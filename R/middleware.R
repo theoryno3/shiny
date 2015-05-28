@@ -21,7 +21,7 @@ httpResponse <- function(status = 200,
   # Make sure it's a list, not a vector
   headers <- as.list(headers)
   if (is.null(headers$`X-UA-Compatible`))
-    headers$`X-UA-Compatible` <- "chrome=1"
+    headers$`X-UA-Compatible` <- "IE=edge,chrome=1"
   resp <- list(status = status, content_type = content_type, content = content,
                headers = headers)
   class(resp) <- 'httpResponse'
@@ -203,8 +203,7 @@ staticHandler <- function(root) {
     if (is.null(abs.path))
       return(NULL)
 
-    ext <- tools::file_ext(abs.path)
-    content.type <- getContentType(ext)
+    content.type <- getContentType(abs.path)
     response.content <- readBin(abs.path, 'raw', n=file.info(abs.path)$size)
     return(httpResponse(200, content.type, response.content))
   })
@@ -222,11 +221,12 @@ staticHandler <- function(root) {
 # return value of `createHttpuvApp` to httpuv's `startServer` function.
 #
 ## ------------------------------------------------------------------------
-HandlerList <- setRefClass("HandlerList",
-  fields = list(
-    handlers = "list"
-  ),
-  methods = list(
+HandlerList <- R6Class("HandlerList",
+  portable = FALSE,
+  class = FALSE,
+  public = list(
+    handlers = list(),
+
     add = function(handler, key, tail = FALSE) {
       if (!is.null(handlers[[key]]))
         stop("Key ", key, " already in use")
@@ -256,12 +256,18 @@ HandlerList <- setRefClass("HandlerList",
   )
 )
 
-HandlerManager <- setRefClass("HandlerManager",
-  fields = list(
+HandlerManager <- R6Class("HandlerManager",
+  portable = FALSE,
+  class = FALSE,
+  public = list(
     handlers = "HandlerList",
-    wsHandlers = "HandlerList"
-  ),
-  methods = list(
+    wsHandlers = "HandlerList",
+
+    initialize = function() {
+      handlers <<- HandlerList$new()
+      wsHandlers <<- HandlerList$new()
+    },
+
     addHandler = function(handler, key, tail = FALSE) {
       handlers$add(handler, key, tail)
     },
@@ -281,7 +287,7 @@ HandlerManager <- setRefClass("HandlerManager",
     createHttpuvApp = function() {
       list(
         onHeaders = function(req) {
-          maxSize <- getOption('shiny.maxRequestSize', 5 * 1024 * 1024)
+          maxSize <- getOption('shiny.maxRequestSize') %OR% (5 * 1024 * 1024)
           if (maxSize <= 0)
             return(NULL)
 
@@ -306,7 +312,7 @@ HandlerManager <- setRefClass("HandlerManager",
           function (req) {
             return(handlers$invoke(req))
           },
-          getOption('shiny.sharedSecret', NULL)
+          getOption('shiny.sharedSecret')
         ),
         onWSOpen = function(ws) {
           return(wsHandlers$invoke(ws))
@@ -314,7 +320,7 @@ HandlerManager <- setRefClass("HandlerManager",
       )
     },
     .httpServer = function(handler, sharedSecret) {
-      filter <- getOption('shiny.http.response.filter', NULL)
+      filter <- getOption('shiny.http.response.filter')
       if (is.null(filter))
         filter <- function(req, response) response
 
@@ -329,11 +335,11 @@ HandlerManager <- setRefClass("HandlerManager",
         response <- handler(req)
         if (is.null(response))
           response <- httpResponse(404, content="<h1>Not Found</h1>")
-        
+
         if (inherits(response, "httpResponse")) {
           headers <- as.list(response$headers)
           headers$'Content-Type' <- response$content_type
-  
+
           response <- filter(req, response)
           return(list(status=response$status,
             body=response$content,

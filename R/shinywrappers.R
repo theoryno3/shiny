@@ -16,155 +16,26 @@ globalVariables('func')
 #'
 #' @export
 markRenderFunction <- function(uiFunc, renderFunc) {
-  class(renderFunc) <- c("shiny.render.function", "function")
-  attr(renderFunc, "outputFunc") <- uiFunc
-  renderFunc
+  structure(renderFunc,
+            class      = c("shiny.render.function", "function"),
+            outputFunc = uiFunc)
 }
 
-useRenderFunction <- function(renderFunc) {
+useRenderFunction <- function(renderFunc, inline = FALSE) {
   outputFunction <- attr(renderFunc, "outputFunc")
-  id <- createUniqueId(8)
+  id <- createUniqueId(8, "out")
   o <- getDefaultReactiveDomain()$output
   if (!is.null(o))
     o[[id]] <- renderFunc
-  return(outputFunction(id))
+  if (is.logical(formals(outputFunction)[["inline"]])) {
+    outputFunction(id, inline = inline)
+  } else outputFunction(id)
 }
 
-#' Plot Output
-#'
-#' Renders a reactive plot that is suitable for assigning to an \code{output}
-#' slot.
-#'
-#' The corresponding HTML output tag should be \code{div} or \code{img} and have
-#' the CSS class name \code{shiny-plot-output}.
-#'
-#' @seealso For more details on how the plots are generated, and how to control
-#'   the output, see \code{\link{plotPNG}}.
-#'
-#' @param expr An expression that generates a plot.
-#' @param width The width of the rendered plot, in pixels; or \code{'auto'} to
-#'   use the \code{offsetWidth} of the HTML element that is bound to this plot.
-#'   You can also pass in a function that returns the width in pixels or
-#'   \code{'auto'}; in the body of the function you may reference reactive
-#'   values and functions.
-#' @param height The height of the rendered plot, in pixels; or \code{'auto'} to
-#'   use the \code{offsetHeight} of the HTML element that is bound to this plot.
-#'   You can also pass in a function that returns the width in pixels or
-#'   \code{'auto'}; in the body of the function you may reference reactive
-#'   values and functions.
-#' @param res Resolution of resulting plot, in pixels per inch. This value is
-#'   passed to \code{\link{png}}. Note that this affects the resolution of PNG
-#'   rendering in R; it won't change the actual ppi of the browser.
-#' @param ... Arguments to be passed through to \code{\link[grDevices]{png}}.
-#'   These can be used to set the width, height, background color, etc.
-#' @param env The environment in which to evaluate \code{expr}.
-#' @param quoted Is \code{expr} a quoted expression (with \code{quote()})? This
-#'   is useful if you want to save an expression in a variable.
-#' @param func A function that generates a plot (deprecated; use \code{expr}
-#'   instead).
-#'
 #' @export
-renderPlot <- function(expr, width='auto', height='auto', res=72, ...,
-                       env=parent.frame(), quoted=FALSE, func=NULL) {
-  if (!is.null(func)) {
-    shinyDeprecated(msg="renderPlot: argument 'func' is deprecated. Please use 'expr' instead.")
-  } else {
-    installExprFunction(expr, "func", env, quoted)
-  }
-
-  args <- list(...)
-
-  if (is.function(width))
-    widthWrapper <- reactive({ width() })
-  else
-    widthWrapper <- NULL
-
-  if (is.function(height))
-    heightWrapper <- reactive({ height() })
-  else
-    heightWrapper <- NULL
-
-  # If renderPlot isn't going to adapt to the height of the div, then the
-  # div needs to adapt to the height of renderPlot. By default, plotOutput
-  # sets the height to 400px, so to make it adapt we need to override it
-  # with NULL.
-  outputFunc <- if (identical(height, 'auto'))
-    plotOutput
-  else
-    function(outputId) plotOutput(outputId, height = NULL)
-
-  return(markRenderFunction(outputFunc, function(shinysession, name, ...) {
-    if (!is.null(widthWrapper))
-      width <- widthWrapper()
-    if (!is.null(heightWrapper))
-      height <- heightWrapper()
-
-    # Note that these are reactive calls. A change to the width and height
-    # will inherently cause a reactive plot to redraw (unless width and
-    # height were explicitly specified).
-    prefix <- 'output_'
-    if (width == 'auto')
-      width <- shinysession$clientData[[paste(prefix, name, '_width', sep='')]];
-    if (height == 'auto')
-      height <- shinysession$clientData[[paste(prefix, name, '_height', sep='')]];
-
-    if (is.null(width) || is.null(height) || width <= 0 || height <= 0)
-      return(NULL)
-
-    # Resolution multiplier
-    pixelratio <- shinysession$clientData$pixelratio
-    if (is.null(pixelratio))
-      pixelratio <- 1
-
-    coordmap <- NULL
-    plotFunc <- function() {
-      # Actually perform the plotting
-      result <- withVisible(func())
-      if (result$visible)
-        print(result$value)
-
-      # Now capture some graphics device info before we close it
-      usrCoords <- par('usr')
-      usrBounds <- usrCoords
-      if (par('xlog')) {
-        usrBounds[c(1,2)] <- 10 ^ usrBounds[c(1,2)]
-      }
-      if (par('ylog')) {
-        usrBounds[c(3,4)] <- 10 ^ usrBounds[c(3,4)]
-      }
-
-      coordmap <<- list(
-        usr = c(
-          left = usrCoords[1],
-          right = usrCoords[2],
-          bottom = usrCoords[3],
-          top = usrCoords[4]
-        ),
-        # The bounds of the plot area, in DOM pixels
-        bounds = c(
-          left = grconvertX(usrBounds[1], 'user', 'nfc') * width,
-          right = grconvertX(usrBounds[2], 'user', 'nfc') * width,
-          bottom = (1-grconvertY(usrBounds[3], 'user', 'nfc')) * height,
-          top = (1-grconvertY(usrBounds[4], 'user', 'nfc')) * height
-        ),
-        log = c(
-          x = par('xlog'),
-          y = par('ylog')
-        ),
-        pixelratio = pixelratio
-      )
-    }
-
-    outfile <- do.call(plotPNG, c(plotFunc, width=width*pixelratio,
-                                  height=height*pixelratio, res=res*pixelratio, args))
-    on.exit(unlink(outfile))
-
-    # Return a list of attributes for the img
-    return(list(
-      src=shinysession$fileUrl(name, outfile, contentType='image/png'),
-      width=width, height=height, coordmap=coordmap
-    ))
-  }))
+#' @method as.tags shiny.render.function
+as.tags.shiny.render.function <- function(x, ..., inline = FALSE) {
+  useRenderFunction(x, inline = inline)
 }
 
 #' Image file output
@@ -268,11 +139,7 @@ renderImage <- function(expr, env=parent.frame(), quoted=FALSE,
     }
 
     # If contentType not specified, autodetect based on extension
-    if (is.null(imageinfo$contentType)) {
-      contentType <- getContentType(sub('^.*\\.', '', basename(imageinfo$src)))
-    } else {
-      contentType <- imageinfo$contentType
-    }
+    contentType <- imageinfo$contentType %OR% getContentType(imageinfo$src)
 
     # Extra values are everything in imageinfo except 'src' and 'contentType'
     extra_attr <- imageinfo[!names(imageinfo) %in% c('src', 'contentType')]
@@ -311,7 +178,7 @@ renderTable <- function(expr, ..., env=parent.frame(), quoted=FALSE, func=NULL) 
   }
 
   markRenderFunction(tableOutput, function() {
-    classNames <- getOption('shiny.table.class', 'data table table-bordered table-condensed')
+    classNames <- getOption('shiny.table.class') %OR% 'data table table-bordered table-condensed'
     data <- func()
 
     if (is.null(data) || identical(data, data.frame()))
@@ -456,7 +323,8 @@ renderUI <- function(expr, env=parent.frame(), quoted=FALSE, func=NULL) {
 
     result <- takeSingletons(result, shinysession$singletons, desingleton=FALSE)$ui
     result <- surroundSingletons(result)
-    dependencies <- lapply(getNewestDeps(findDependencies(result)), createWebDependency)
+    dependencies <- lapply(resolveDependencies(findDependencies(result)),
+      createWebDependency)
     names(dependencies) <- NULL
 
     # renderTags returns a list with head, singletons, and html
@@ -527,7 +395,9 @@ downloadHandler <- function(filename, content, contentType=NA) {
 #' \code{"AsIs"} (usually returned from \code{\link{I}()}) will be evaluated in
 #' JavaScript. This is useful when the type of the option value is not supported
 #' in JSON, e.g., a JavaScript function, which can be obtained by evaluating a
-#' character string.
+#' character string. Note this only applies to the root-level elements of the
+#' options list, and the \code{I()} notation does not work for lower-level
+#' elements in the list.
 #' @param expr An expression that returns a data frame or a matrix.
 #' @param options A list of initialization options to be passed to DataTables,
 #'   or a function to return such a list.
@@ -535,35 +405,120 @@ downloadHandler <- function(filename, content, contentType=NA) {
 #'   frequent search requests).
 #' @param callback A JavaScript function to be applied to the DataTable object.
 #'   This is useful for DataTables plug-ins, which often require the DataTable
-#'   instance to be available (\url{http://datatables.net/extras/}).
+#'   instance to be available (\url{http://datatables.net/extensions/}).
+#' @param escape Whether to escape HTML entities in the table: \code{TRUE} means
+#'   to escape the whole table, and \code{FALSE} means not to escape it.
+#'   Alternatively, you can specify numeric column indices or column names to
+#'   indicate which columns to escape, e.g. \code{1:5} (the first 5 columns),
+#'   \code{c(1, 3, 4)}, or \code{c(-1, -3)} (all columns except the first and
+#'   third), or \code{c('Species', 'Sepal.Length')}.
 #' @references \url{http://datatables.net}
+#' @note This function only provides the server-side version of DataTables
+#'   (using R to process the data object on the server side). There is a
+#'   separate package \pkg{DT} (\url{https://github.com/rstudio/DT}) that allows
+#'   you to create both server-side and client-side DataTables. The functions
+#'   \code{renderDataTable()} and \code{dataTableOutput()} in \pkg{shiny} have
+#'   been deprecated since v0.11.1. Please use \code{DT::renderDataTable()} and
+#'   \code{DT::dataTableOutput()} (see
+#'   \url{http://rstudio.github.io/DT/shiny.html} for more information).
 #' @export
 #' @inheritParams renderPlot
-#' @examples  # pass a callback function to DataTables using I()
-#' renderDataTable(iris,
-#'   options = list(
-#'     iDisplayLength = 5,
-#'     fnInitComplete = I("function(oSettings, json) {alert('Done.');}")
+#' @examples
+#' ## Only run this example in interactive R sessions
+#' if (interactive()) {
+#'   # pass a callback function to DataTables using I()
+#'   shinyApp(
+#'     ui = fluidPage(
+#'       fluidRow(
+#'         column(12,
+#'           dataTableOutput('table')
+#'         )
+#'       )
+#'     ),
+#'     server = function(input, output) {
+#'       output$table <- renderDataTable(iris,
+#'         options = list(
+#'           pageLength = 5,
+#'           initComplete = I("function(settings, json) {alert('Done.');}")
+#'         )
+#'       )
+#'     }
 #'   )
-#' )
+#' }
 renderDataTable <- function(expr, options = NULL, searchDelay = 500,
-                            callback = 'function(oTable) {}',
+                            callback = 'function(oTable) {}', escape = TRUE,
                             env = parent.frame(), quoted = FALSE) {
+  shinyDeprecated(
+    'DT::renderDataTable', old = 'shiny::renderDataTable', version = '0.11.1'
+  )
   installExprFunction(expr, "func", env, quoted)
 
   markRenderFunction(dataTableOutput, function(shinysession, name, ...) {
-    res <- checkAsIs(if (is.function(options)) options() else options)
+    if (is.function(options)) options <- options()
+    options <- checkDT9(options)
+    res <- checkAsIs(options)
     data <- func()
     if (length(dim(data)) != 2) return() # expects a rectangular data object
+    if (is.data.frame(data)) data <- as.data.frame(data)
     action <- shinysession$registerDataObj(name, data, dataTablesJSON)
+    colnames <- colnames(data)
+    # if escape is column names, turn names to numeric indices
+    if (is.character(escape)) {
+      escape <- setNames(seq_len(ncol(data)), colnames)[escape]
+      if (any(is.na(escape)))
+        stop("Some column names in the 'escape' argument not found in data")
+    }
+    colnames[escape] <- htmlEscape(colnames[escape])
+    if (!is.logical(escape)) {
+      if (!is.numeric(escape))
+        stop("'escape' must be TRUE, FALSE, or a numeric vector, or column names")
+      escape <- paste(escape, collapse = ',')
+    }
     list(
-      colnames = colnames(data), action = action, options = res$options,
+      colnames = colnames, action = action, options = res$options,
       evalOptions = if (length(res$eval)) I(res$eval), searchDelay = searchDelay,
-      callback = paste(callback, collapse = '\n')
+      callback = paste(callback, collapse = '\n'), escape = escape
     )
   })
 }
 
+# a data frame containing the DataTables 1.9 and 1.10 names
+DT10Names <- function() {
+  rbind(
+    read.table(system.file('www/shared/datatables/upgrade1.10.txt', package = 'shiny'),
+               stringsAsFactors = FALSE),
+    c('aoColumns', 'Removed')  # looks like an omission on the upgrade guide
+  )
+}
+
+# check DataTables 1.9.x options, and give instructions for upgrading to 1.10.x
+checkDT9 <- function(options) {
+  nms <- names(options)
+  if (length(nms) == 0L) return(options)
+  DT10 <- DT10Names()
+  # e.g. the top level option name for oLanguage.sSearch should be oLanguage
+  i <- nms %in% gsub('[.].*', '', DT10[, 1])
+  if (!any(i)) return(options)  # did not see old option names, ready to go!
+  msg <- paste(
+    'shiny (>= 0.10.2) has upgraded DataTables from 1.9.4 to 1.10.2, ',
+    'and DataTables 1.10.x uses different parameter names with 1.9.x. ',
+    'Please follow the upgrade guide https://datatables.net/upgrade/1.10-convert',
+    ' to change your DataTables parameter names:\n\n',
+    paste(formatUL(nms[i]), collapse = '\n'), '\n', sep = ''
+  )
+  j <- gsub('[.].*', '', DT10[, 1]) %in% nms
+  # I cannot help you upgrade automatically in these cases, so I have to stop
+  if (any(grepl('[.]', DT10[j, 1])) || any(grepl('[.]', DT10[j, 2]))) stop(msg)
+  warning(msg)
+  nms10 <- DT10[match(nms[i], DT10[, 1]), 2]
+  if (any(nms10 == 'Removed')) stop(
+    "These parameters have been removed in DataTables 1.10.x:\n\n",
+    paste(formatUL(nms[i][nms10 == 'Removed']), collapse = '\n'),
+    "\n\n", msg
+  )
+  names(options)[i] <- nms10
+  options
+}
 
 # Deprecated functions ------------------------------------------------------
 

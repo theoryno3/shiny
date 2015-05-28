@@ -5,7 +5,7 @@ reactLogHandler <- function(req) {
   if (!identical(req$PATH_INFO, '/reactlog'))
     return(NULL)
 
-  if (!getOption('shiny.reactlog', FALSE)) {
+  if (!isTRUE(getOption('shiny.reactlog'))) {
     return(NULL)
   }
 
@@ -35,7 +35,9 @@ sessionHandler <- function(req) {
   subreq$PATH_INFO <- subpath
   subreq$SCRIPT_NAME <- paste(subreq$SCRIPT_NAME, matches[[1]][2], sep='')
 
-  return(shinysession$handleRequest(subreq))
+  withReactiveDomain(shinysession, {
+    shinysession$handleRequest(subreq)
+  })
 }
 
 dynamicHandler <- function(filePath, dependencyFiles=filePath) {

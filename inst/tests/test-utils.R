@@ -21,6 +21,10 @@ test_that("Setting process-wide seed doesn't affect private randomness", {
 test_that("Resetting private seed doesn't result in dupes", {
   .globals$ownSeed <- NULL
   id3 <- createUniqueId(4)
+  # Make sure we let enough time pass that reinitializing the seed is
+  # going to result in a different value. This is especially required
+  # on Windows.
+  Sys.sleep(1)
   set.seed(0)
   .globals$ownSeed <- NULL
   id4 <- createUniqueId(4)
@@ -83,4 +87,33 @@ test_that("need() works as expected", {
   expect_null(need(TRUE, FALSE))
   expect_null(need(c(NA, NA, TRUE), FALSE))
   expect_null(need(c(FALSE, FALSE, TRUE), FALSE))
+})
+
+test_that("anyUnnamed works as expected", {
+  expect_false(anyUnnamed(list()))
+  expect_true(anyUnnamed(list(1,2,3)))
+  expect_true(anyUnnamed(list(A = 1,2,3)))
+  expect_false(anyUnnamed(list(A = 1,B = 2,C = 3)))
+
+  # List with named elements removed
+  x <- list(A = 1, B = 2, 3, 4)
+  x <- x[3:4]
+  expect_true(anyUnnamed(x))
+})
+
+test_that("Callbacks fire in predictable order", {
+  cb <- Callbacks$new()
+
+  x <- numeric(0)
+  cb$register(function() {
+    x <<- c(x, 1)
+  })
+  cb$register(function() {
+    x <<- c(x, 2)
+  })
+  cb$register(function() {
+    x <<- c(x, 3)
+  })
+  cb$invoke()
+  expect_equal(x, c(1, 2, 3))
 })

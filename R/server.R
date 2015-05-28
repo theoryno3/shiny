@@ -9,7 +9,7 @@ inputHandlers <- Map$new()
 #'
 #' Adds an input handler for data of this type. When called, Shiny will use the
 #' function provided to refine the data passed back from the client (after being
-#' deserialized by RJSONIO) before making it available in the \code{input}
+#' deserialized by jsonlite) before making it available in the \code{input}
 #' variable of the \code{server.R} file.
 #'
 #' This function will register the handler for the duration of the R process
@@ -31,7 +31,7 @@ inputHandlers <- Map$new()
 #'   parameters:
 #'    \enumerate{
 #'      \item{The value of this input as provided by the client, deserialized
-#'      using RJSONIO.}
+#'      using jsonlite.}
 #'      \item{The \code{shinysession} in which the input exists.}
 #'      \item{The name of the input.}
 #'    }
@@ -64,7 +64,7 @@ registerInputHandler <- function(type, fun, force=FALSE){
 #' Deregister an Input Handler
 #'
 #' Removes an Input Handler. Rather than using the previously specified handler
-#' for data of this type, the default RJSONIO serialization will be used.
+#' for data of this type, the default jsonlite serialization will be used.
 #'
 #' @param type The type for which handlers should be removed.
 #' @return The handler previously associated with this \code{type}, if one
@@ -169,13 +169,6 @@ addResourcePath <- function(prefix, directoryPath) {
 
   existing <- .globals$resources[[prefix]]
 
-  if (!is.null(existing)) {
-    if (!identical(existing$directoryPath, directoryPath)) {
-      warning("Overriding existing prefix ", prefix, " => ",
-              existing$directoryPath)
-    }
-  }
-
   .globals$resources[[prefix]] <- list(directoryPath=directoryPath,
                                        func=staticHandler(directoryPath))
 }
@@ -209,14 +202,15 @@ resourcePathHandler <- function(req) {
 #'
 #' Defines the server-side logic of the Shiny application. This generally
 #' involves creating functions that map user inputs to various kinds of output.
+#' In older versions of Shiny, it was necessary to call \code{shinyServer()} in
+#' the \code{server.R} file, but this is no longer required as of Shiny 0.10.
+#' Now the \code{server.R} file may simply return the appropriate server
+#' function (as the last expression in the code), without calling
+#' \code{shinyServer()}.
 #'
-#' @param func The server function for this application. See the details section
-#'   for more information.
-#'
-#' @details
-#' Call \code{shinyServer} from your application's \code{server.R} file, passing
-#' in a "server function" that provides the server-side logic of your
-#' application.
+#' Call \code{shinyServer} from your application's \code{server.R}
+#' file, passing in a "server function" that provides the server-side logic of
+#' your application.
 #'
 #' The server function will be called when each client (web browser) first loads
 #' the Shiny application's page. It must take an \code{input} and an
@@ -227,6 +221,9 @@ resourcePathHandler <- function(req) {
 #' See the \href{http://rstudio.github.com/shiny/tutorial/}{tutorial} for more
 #' on how to write a server function.
 #'
+#' @param func The server function for this application. See the details section
+#'   for more information.
+#'
 #' @examples
 #' \dontrun{
 #' # A very simple Shiny app that takes a message from the user
@@ -236,6 +233,16 @@ resourcePathHandler <- function(req) {
 #'     toupper(input$message)
 #'   })
 #' })
+#'
+#'
+#' # It is also possible for a server.R file to simply return the function,
+#' # without calling shinyServer().
+#' # For example, the server.R file could contain just the following:
+#' function(input, output, session) {
+#'   output$uppercase <- renderText({
+#'     toupper(input$message)
+#'   })
+#' }
 #' }
 #'
 #' @export
@@ -249,8 +256,12 @@ decodeMessage <- function(data) {
     packBits(rawToBits(data[pos:(pos+3)]), type='integer')
   }
 
-  if (readInt(1) != 0x01020202L)
-    return(fromJSON(rawToChar(data), asText=TRUE, simplify=FALSE))
+  if (readInt(1) != 0x01020202L) {
+    # Treat message as UTF-8
+    charData <- rawToChar(data)
+    Encoding(charData) <- 'UTF-8'
+    return(jsonlite::fromJSON(charData, simplifyVector=FALSE))
+  }
 
   i <- 5
   parts <- list()
@@ -278,7 +289,7 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
   # This value, if non-NULL, must be present on all HTTP and WebSocket
   # requests as the Shiny-Shared-Secret header or else access will be
   # denied (403 response for HTTP, and instant close for websocket).
-  sharedSecret <- getOption('shiny.sharedSecret', NULL)
+  sharedSecret <- getOption('shiny.sharedSecret')
 
   appHandlers <- list(
     http = joinHandlers(c(
@@ -303,7 +314,7 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
         if (is.character(msg))
           msg <- charToRaw(msg)
 
-        if (getOption('shiny.trace', FALSE)) {
+        if (isTRUE(getOption('shiny.trace'))) {
           if (binary)
             message("RECV ", '$$binary data$$')
           else
@@ -395,9 +406,9 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
                 args$clientData <- shinysession$clientData
 
               if ('session' %in% names(formals(serverFunc)))
-                args$session <- shinysession$session
+                args$session <- shinysession
 
-              withReactiveDomain(shinysession$session, {
+              withReactiveDomain(shinysession, {
                 do.call(appvars$server, args)
               })
             })
@@ -437,7 +448,7 @@ createAppHandlers <- function(httpHandlers, serverFuncSource) {
       })
 
       ws$onClose(function() {
-        shinysession$close()
+        shinysession$wsClosed()
         appsByToken$remove(shinysession$token)
       })
 
@@ -463,7 +474,7 @@ identicalFunctionBodies <- function(a, b) {
 handlerManager <- HandlerManager$new()
 
 addSubApp <- function(appObj, autoRemove = TRUE) {
-  path <- sprintf("/%s", createUniqueId(16))
+  path <- createUniqueId(16, "/app")
   appHandlers <- createAppHandlers(appObj$httpHandler, appObj$serverFuncSource)
 
   # remove the leading / from the path so a relative path is returned
@@ -539,8 +550,8 @@ serviceApp <- function() {
 
 #' Run Shiny Application
 #'
-#' Runs a Shiny application. This function normally does not return; interrupt
-#' R to stop the application (usually by pressing Ctrl+C or Esc).
+#' Runs a Shiny application. This function normally does not return; interrupt R
+#' to stop the application (usually by pressing Ctrl+C or Esc).
 #'
 #' The host parameter was introduced in Shiny 0.9.0. Its default value of
 #' \code{"127.0.0.1"} means that, contrary to previous versions of Shiny, only
@@ -550,9 +561,15 @@ serviceApp <- function() {
 #'
 #' @param appDir The directory of the application. Should contain
 #'   \code{server.R}, plus, either \code{ui.R} or a \code{www} directory that
-#'   contains the file \code{index.html}. Defaults to the working directory.
-#' @param port The TCP port that the application should listen on. Defaults to
-#'   choosing a random port.
+#'   contains the file \code{index.html}. Alternately, instead of
+#'   \code{server.R} and \code{ui.R}, the directory may contain just
+#'   \code{app.R}. Defaults to the working directory. Instead of a directory,
+#'   this could be a list with \code{ui} and \code{server} components, or a
+#'   Shiny app object created by \code{\link{shinyApp}}.
+#' @param port The TCP port that the application should listen on. If the
+#'   \code{port} is not specified, and the \code{shiny.port} option is set (with
+#'   \code{options(shiny.port = XX)}), then that port will be used. Otherwise,
+#'   use a random port.
 #' @param launch.browser If true, the system's default web browser will be
 #'   launched automatically after the app is started. Defaults to true in
 #'   interactive sessions only. This value of this parameter can also be a
@@ -567,8 +584,8 @@ serviceApp <- function() {
 #'   the value \code{"showcase"}, shows application code and metadata from a
 #'   \code{DESCRIPTION} file in the application directory alongside the
 #'   application. If set to \code{"normal"}, displays the application normally.
-#'   Defaults to \code{"auto"}, which displays the application in the mode
-#'   given in its \code{DESCRIPTION} file, if any.
+#'   Defaults to \code{"auto"}, which displays the application in the mode given
+#'   in its \code{DESCRIPTION} file, if any.
 #'
 #' @examples
 #' \dontrun{
@@ -577,22 +594,37 @@ serviceApp <- function() {
 #'
 #' # Start app in a subdirectory called myapp
 #' runApp("myapp")
+#' }
+#'
+#' ## Only run this example in interactive R sessions
+#' if (interactive()) {
+#'   # Apps can be run without a server.r and ui.r file
+#'   runApp(list(
+#'     ui = bootstrapPage(
+#'       numericInput('n', 'Number of obs', 100),
+#'       plotOutput('plot')
+#'     ),
+#'     server = function(input, output) {
+#'       output$plot <- renderPlot({ hist(runif(input$n)) })
+#'     }
+#'   ))
 #'
 #'
-#' # Apps can be run without a server.r and ui.r file
-#' runApp(list(
-#'   ui = bootstrapPage(
-#'     numericInput('n', 'Number of obs', 100),
-#'     plotOutput('plot')
-#'   ),
-#'   server = function(input, output) {
-#'     output$plot <- renderPlot({ hist(runif(input$n)) })
-#'   }
-#' ))
+#'   # Running a Shiny app object
+#'   app <- shinyApp(
+#'     ui = bootstrapPage(
+#'       numericInput('n', 'Number of obs', 100),
+#'       plotOutput('plot')
+#'     ),
+#'     server = function(input, output) {
+#'       output$plot <- renderPlot({ hist(runif(input$n)) })
+#'     }
+#'   )
+#'   runApp(app)
 #' }
 #' @export
 runApp <- function(appDir=getwd(),
-                   port=NULL,
+                   port=getOption('shiny.port'),
                    launch.browser=getOption('shiny.launch.browser',
                                             interactive()),
                    host=getOption('shiny.host', '127.0.0.1'),
@@ -634,7 +666,9 @@ runApp <- function(appDir=getwd(),
   if (is.character(appDir)) {
     desc <- file.path.ci(appDir, "DESCRIPTION")
     if (file.exists(desc)) {
-      settings <- read.dcf(desc)
+      con <- file(desc, encoding = checkEncoding(desc))
+      on.exit(close(con), add = TRUE)
+      settings <- read.dcf(con)
       if ("DisplayMode" %in% colnames(settings)) {
         mode <- settings[1,"DisplayMode"]
         if (mode == "Showcase") {
@@ -685,10 +719,12 @@ runApp <- function(appDir=getwd(),
   }
 
   appParts <- as.shiny.appobj(appDir)
-  if (!is.null(appParts$onStart))
-    appParts$onStart()
+  # Set up the onEnd before we call onStart, so that it gets called even if an
+  # error happens in onStart.
   if (!is.null(appParts$onEnd))
     on.exit(appParts$onEnd(), add = TRUE)
+  if (!is.null(appParts$onStart))
+    appParts$onStart()
 
   server <- startApp(appParts, port, host, quiet)
 
@@ -760,15 +796,16 @@ stopApp <- function(returnValue = NULL) {
 #'   code or commentary.
 #'
 #' @examples
-#' \dontrun{
-#' # List all available examples
-#' runExample()
+#' ## Only run this example in interactive R sessions
+#' if (interactive()) {
+#'   # List all available examples
+#'   runExample()
 #'
-#' # Run one of the examples
-#' runExample("01_hello")
+#'   # Run one of the examples
+#'   runExample("01_hello")
 #'
-#' # Print the directory containing the code for all examples
-#' system.file("examples", package="shiny")
+#'   # Print the directory containing the code for all examples
+#'   system.file("examples", package="shiny")
 #' }
 #' @export
 runExample <- function(example=NA,

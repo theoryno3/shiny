@@ -1,5 +1,5 @@
 writeReactLog <- function(file=stdout()) {
-  cat(RJSONIO::toJSON(.graphEnv$log, pretty=TRUE), file=file)
+  cat(toJSON(.graphStack$as_list(), pretty=TRUE), file=file)
 }
 
 #' Reactive Log Visualizer
@@ -55,8 +55,8 @@ renderReactLog <- function() {
 }
 
 .graphAppend <- function(logEntry, domain = getDefaultReactiveDomain()) {
-  if (isTRUE(getOption('shiny.reactlog', FALSE)))
-    .graphEnv$log <- c(.graphEnv$log, list(logEntry))
+  if (isTRUE(getOption('shiny.reactlog')))
+    .graphStack$push(logEntry)
 
   if (!is.null(domain)) {
     domain$reactlog(logEntry)
@@ -99,5 +99,5 @@ renderReactLog <- function() {
   .graphAppend(list(action='invalidate', id=id), domain)
 }
 
-.graphEnv <- new.env()
-.graphEnv$log <- list()
+#' @include stack.R
+.graphStack <- Stack$new()

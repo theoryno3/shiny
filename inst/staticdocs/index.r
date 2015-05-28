@@ -42,6 +42,7 @@ sd_section("UI Inputs",
     "sliderInput",
     "submitButton",
     "textInput",
+    "passwordInput",
     "updateCheckboxGroupInput",
     "updateCheckboxInput",
     "updateDateInput",
@@ -64,7 +65,9 @@ sd_section("UI Outputs",
     "tableOutput",
     "textOutput",
     "verbatimTextOutput",
-    "downloadButton"
+    "downloadButton",
+    "Progress",
+    "withProgress"
   )
 )
 sd_section("Interface builder functions",
@@ -105,6 +108,7 @@ sd_section("Reactive constructs",
     "isolate",
     "makeReactiveBinding",
     "observe",
+    "observeEvent",
     "reactive",
     "reactiveFileReader",
     "reactivePoll",
@@ -127,8 +131,6 @@ sd_section("Running",
   c(
     "runApp",
     "runExample",
-    "runGist",
-    "runGitHub",
     "runUrl",
     "stopApp"
   )
@@ -136,6 +138,7 @@ sd_section("Running",
 sd_section("Extending Shiny",
   "Functions that are intended to be called by third-party packages that extend Shiny.",
   c(
+    "createWebDependency",
     "addResourcePath",
     "registerInputHandler",
     "removeInputHandler",
@@ -152,15 +155,26 @@ sd_section("Utility functions",
     "parseQueryString",
     "plotPNG",
     "repeatable",
-    "shinyDeprecated"
+    "shinyDeprecated",
+    "serverInfo",
+    "shiny-options"
+  )
+)
+sd_section("Plot interaction",
+  "Functions related to interactive plots",
+  c(
+    "brushedPoints",
+    "brushOpts",
+    "clickOpts",
+    "dblclickOpts",
+    "hoverOpts",
+    "nearPoints"
   )
 )
 sd_section("Embedding",
   "Functions that are intended for third-party packages that embed Shiny applications.",
   c(
     "shinyApp",
-    "maskReactiveContext",
-    "knitr_methods",
-    "getProvidedHtmlDependencies"
+    "maskReactiveContext"
   )
 )
